@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+    <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+    <title>Modelling Interception with JavaScript</title>
+</head>
+<body>
+<style type="text/css">
+p { font-family: sans-serif; }
+</style>
+
+
+<h1> <p> Modelling Interception with JavaScript </p> </h1>
+<h2> <p> General description</p></h2>
+<p> This JavaScript application can be used to calculate interception using the Rutter et al. (1971) approach. To do this, various model parameters can be adjusted. Using the rainfall event specified in this example, the throughfall calculated by the model can be calibrated against observations by varying the parameters. For this rainfall event, measured values of the throughfall are available for three different tree species (Jackisch et al., 2013).</p>
+
+<br>
+<h2> <p> Inputs</p></h2>
+    
+<table cellpadding=0 cellspacing=0>
+  <tr>
+    <th><p>Parameter</p></th>
+    <th><p>Value</p></th>
+    <th><p>Unit</p></th>
+  </tr>
+  <tr>
+      <td><p>Rainfall time series (comma separated values)</p></td>
+    <td> <input type="text" id="in_rainfall" value=0.0,5.8,13.4,1.7,0.4,0.0,0.0,0.0,0.0> </td>
+    <td><p> [mm] </p> </td>
+   </tr>
+  <tr>
+    <td><p>Time step</p></td>
+    <td> <input type="text" id="in_ts" value="900"> </td>
+    <td><p> [s] </p> </td>
+   </tr>
+  <tr>
+    <td><p>Fraction of throughfall</p></td>
+    <td> <input type="text" id="in_ntf" value="0.25"> </td>
+    <td><p> [-] </p> </td>
+   </tr>
+  <tr>
+    <td><p>Interception capacity</p></td>
+    <td> <input type="text" id="in_Ctf" value="3"> </td>
+    <td><p> [mm] </p> </td>
+   </tr>
+    <tr>
+    <td><p>Avg. daily evapotranspiration</p></td>
+    <td> <input type="text" id="in_ETPd" value="7.0"> </td>
+    <td><p> [mm/d] </p> </td>
+   </tr>
+  <tr>
+    <td><p>Avg. drainage rate</p></td>
+    <td> <input type="text" id="in_Dsd" value="2.88"> </td>
+    <td><p> [mm/d] </p> </td>
+   </tr>
+  <tr>
+    <td><p>Parameter b</p></td>
+    <td> <input type="text" id="in_b" value="3.7"> </td>
+    <td><p> [m] </p> </td>
+   </tr>
+  <tr>
+    <td><p>Observations</p></td>
+    <td> <select id = "select_tree">
+        <option> ---Bitte auswählen--- </option>
+        <option> Lime tree </option>
+        <option> Plane tree </option>
+	<option> Fir </option>
+        </select>   </td>
+    <td><p> [-] </p> </td>
+   </tr>
+
+</table>
+
+
+<br>
+<button onclick="calculate()">Calculate</button>
+<br>
+
+<h2> <p> Results </p></h2>
+
+<p> Output: </p> <input type="text" id="out_text">
+<p> Water balance [mm] </p> <input type="text" id="out_wb">
+
+<p> Rainfall total [mm] </p> <input type="text" id="out_n">
+<p> Throughfall total [mm] </p> <input type="text" id="out_bn">
+
+
+<div id="out_chart" style="width:600px;height:400px;"></div>
+
+<h2><p>References</p></h2>
+<p>Jackisch, N., Brendt, T., Weiler, M., & Lange, J. (2013). Evaluierung der Regenwasserbewirtschaftung im Vaubangelände, Freiburg i. Br. -unter besonderer Berücksichtigung von Gründächern und Vegetation. Projektbericht (Projektnummer: 2009-09), Universität Freiburg Institut für Geo- und Umweltnaturwissenschaften Professur für Hydrologie.</p>
+<p>Rutter, A. J., Kershaw, K. A., Robins, P. C., and Morton, A. J. (1971). A predictive model of rainfall interception in forests, 1. Derivation of the model from observations in a plantation of Corsican pine. Agr. Meteorol. 9, 367–384.</p>
+
+<script>
+// Standardwerte definieren
+/*document.getElementById('in_kst').value = '20';
+document.getElementById('in_l').value  = '10000';
+document.getElementById('in_nx').value = '100';
+document.getElementById('in_isom').value = '0.0005';
+document.getElementById('in_a').value = '0.1';
+document.getElementById('in_g').value = '9.81';
+document.getElementById('in_b').value = '10';
+document.getElementById('in_rand').value = '6';*/
+document.getElementById("out_text").value="";
+document.getElementById("out_wb").value="";
+</script>
+<noscript>Bitte JavaScript aktivieren!</noscript>
+
+
+<script>
+    // helper functions
+    function parseCSVToFloatArray(csvString) {
+       // Step 1: Split the string into an array
+       const valuesArray = csvString.split(',');
+
+       // Step 2: Convert each element to a float
+       const floatArray = valuesArray.map(value => parseFloat(value));
+
+       return floatArray;
+    }
+    
+    function sumOverColumn(matrix, columnIndex) {
+       if (columnIndex < 0 || columnIndex >= matrix[0].length) {
+           return 0; // Invalid column index
+       }
+
+       return matrix.reduce((sum, row) => sum + row[columnIndex], 0);
+    }
+
+    const arrayColumn = (arr, n) => arr.map(x => x[n]);
+    const sumByCol = (arr, col) => arr.reduce((acc, row) => acc + row[col], 0)
+
+    const trees = ["Lime tree", "Plane tree", "Fir"];
+    
+    // Funktion zur Überprüfung der Eingabedaten
+    function validateParameters(rainfall, ts, ntf, Ctf, ETPd, Dsd, b){
+        var msg = "Fehler: ";
+        var msgl = msg.length
+	try{
+           var rainfall_Str = document.getElementById("in_rainfall").value;
+	   rainfall = parseCSVToFloatArray(rainfall_Str);
+	} catch(error){
+	   msg+=" Zeitreihe ";
+	}
+	if(ts<=0 || ts > 86400) msg+="ts ";
+	if(ntf < 0 || ntf > 1.) msg+="ntf ";
+        if(Ctf < 0 || Ctf > 20) msg+="Ctf ";
+	if(ETPd < 0 || ETPd > 10.) msg+="ETPd ";
+        if(Dsd < 0 || Dsd > 10) msg+="Dsd ";
+        if(b <= 0) msg+="b ";
+        if(msg.length > msgl){
+            document.getElementById("out_text").value=msg;
+            return false;
+        }
+        else return true;
+    }
+    
+    // Interzeptionsmodell nach Rutter et al.
+    function calculate(){
+ 
+        // Zunächst Eingaben abfragen
+        var rainfall_Str = document.getElementById("in_rainfall").value;
+	rainfall = parseCSVToFloatArray(rainfall_Str);
+        var ts = parseFloat(document.getElementById("in_ts").value);
+	var ntf = parseFloat(document.getElementById("in_ntf").value);
+        var Ctf = parseFloat(document.getElementById("in_Ctf").value);
+        var ETPd = parseFloat(document.getElementById("in_ETPd").value);
+        var Dsd = parseFloat(document.getElementById("in_Dsd").value);
+	var b = parseFloat(document.getElementById("in_b").value);
+	// Vergleichsdaten
+	var select_tree = document.getElementById("select_tree");  
+        var tree_type = select_tree.selectedIndex;
+	// val data_comp;
+	// console.log(tree_type);
+      	if (tree_type==1) var data_comp=new Array(0.0,2.2,11.1,1.8,0.5,0.2,0.1,0.1,0.0);
+	else if  (tree_type==2) var data_comp=new Array(0.1,3.0,11.7,2.5,0.5,0.1,0.0,0.0,0.0);
+        else if  (tree_type==3) var data_comp=new Array(0.0,0.0,5.6,1.9,0.4,0.3,0.2,0.1,0.0);
+	else var data_comp = new Array(rainfall.length).fill(0);
+
+	// Ausgaben zurücksetzen
+	document.getElementById("out_text").value="";
+        document.getElementById("out_wb").value="";
+
+
+        if(!validateParameters(rainfall, ts, ntf, Ctf, ETPd, Dsd, b)) return;
+
+    // b: drainage rate exponent [1/mm], default: b=3.7
+    // Ds: drainage rate for canopy interception at capacity Cts, default: Dts=2.88mm/d
+    // Ctf: Capacity of the Canopy, default: Ctf=1.05 (Corsican Pine)
+
+    const ETPs = ETPd / 86400.;
+    
+    const ETP = ETPs * ts;
+
+    const Dss = Dsd / 86400;
+    let Ds = Dss * ts;
+
+    if (Ds > Ctf || Ds < 0) {
+        Ds = Ctf;
+        console.log('Maximum Drainage rate adjusted to capacity');
+    }
+    // console.log(ntf);
+
+    const intc = new Array(rainfall.length).fill().map(() => new Array(11).fill(0));
+    let last_C = Ctf;
+    var wb = 0.;
+
+    for (let ii = 0; ii < rainfall.length; ii++) {
+        // define empty storage for first time step and correct for adjustments in C
+        let t_surplus = 0;
+
+        if (ii === 0) {
+            ci = 0;
+        } else {
+            ci = intc[ii - 1][7];
+
+            if (last_C !== Ctf && ci > Ctf) {
+                t_surplus = ci - Ctf;
+                ci = Ctf;
+                console.log(t_surplus);
+            }
+        }
+
+        const ti = (ii + 1) * ts;
+        intc[ii][0] = ti; // time step
+        intc[ii][1] = rainfall[ii]; // rainfall input
+        intc[ii][2] = rainfall[ii] * ntf; // direct throughfall
+        intc[ii][3] = rainfall[ii] - intc[ii][2]; // rainfall redirected to interception
+        intc[ii][4] = intc[ii][3] + ci; // storage depth
+
+        if (intc[ii][4] > Ctf) intc[ii][5] = Math.min(ETP, intc[ii][4]); // real evaporation
+        else intc[ii][5] = Math.min(ETP * intc[ii][4] / Ctf, intc[ii][4]);
+
+        if (Ctf < intc[ii][4] - intc[ii][5]) intc[ii][6] = Math.max(intc[ii][4] - intc[ii][5] - Ctf, Ds); // drainage
+        else intc[ii][6] = Math.min(Ds * Math.exp(b * (intc[ii][4] - intc[ii][5] - Ctf) / Ctf), intc[ii][4] - intc[ii][5]);
+
+        if (intc[ii][6] < 0) {
+            console.log('*');
+            intc[ii][6] = Math.max(intc[ii][4] + intc[ii][6], 0);
+            intc[ii][7] = 0;
+        }
+
+        intc[ii][7] = intc[ii][4] - intc[ii][5] - intc[ii][6]; // total storage
+
+        if (intc[ii][7] < 0) {
+            console.log('*');
+            intc[ii][6] = Math.max(intc[ii][4] + intc[ii][7], 0);
+            intc[ii][7] = 0;
+        }
+
+        intc[ii][8] = intc[ii][2] + intc[ii][6] + t_surplus; // throughfall
+        intc[ii][9] = intc[ii][1] - intc[ii][5] - intc[ii][7] - intc[ii][8]; // water balance
+        if (ii > 0) intc[ii][9] += intc[ii - 1][7];
+	wb+=intc[ii][9];
+
+
+        last_C = Ctf;
+        intc[ii][10] = ETP - intc[ii][5]; // ET available for transpiration
+    }
+    document.getElementById("out_wb").value=wb;
+    document.getElementById("out_n").value=sumByCol(intc,1);
+    document.getElementById("out_bn").value=sumByCol(intc,8);
+
+    // console.log(intc)
+	// plotting
+	var x = arrayColumn(intc, 0)
+	var y2 = arrayColumn(intc, 8)
+	var y3 = arrayColumn(intc, 1)
+	const strt = "Throughfall "
+
+        var line_1 = {
+            x: x,
+            y: data_comp,
+            name: strt.concat(trees[tree_type-1]),
+            type: 'scatter'
+        };
+
+	var line_2 = {
+            x: x,
+            y: y2,
+            name: strt.concat('Model'),
+            type: 'scatter'
+        };
+
+	var line_3 = {
+            x: x,
+            y: y3,
+            name: 'Rainfall',
+            type: 'scatter'
+        };
+
+
+        var layout = {
+          xaxis: {
+            title: {
+       
+		    text: 'Time [s]',
+            },
+          },
+          yaxis: {
+            title: {
+              text: 'Intensity rainfall / throughfall [mm/dt]',
+            }
+          }
+        };
+        
+        chart = document.getElementById('out_chart');
+        Plotly.newPlot( chart, [line_1,line_2,line_3], layout);
+        
+    }
+</script>
+
+</basefont>
+</body>
+</html>
